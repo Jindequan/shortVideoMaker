@@ -58,10 +58,26 @@ def to_json(obj):
 
 
 def get_uuid(remove_hyphen: bool = False):
-    u = str(uuid4())
+    """
+    生成任务ID
+    如果remove_hyphen为True，则返回不带连字符的UUID
+    否则返回日期时间格式的ID，格式为"YYMMDDHHMM"（年月日时分）
+    例如：2505172043 表示 25年05月17日20点43分
+    """
+    from datetime import datetime
+
+    # 生成日期时间格式的ID
+    now = datetime.now()
+    # 格式：年（后两位）+ 月 + 日 + 时 + 分 + 秒
+    date_id = now.strftime("%y%m%d%H%M%S")
+
+    # 如果指定了remove_hyphen，则返回传统的UUID（兼容旧代码）
     if remove_hyphen:
+        u = str(uuid4())
         u = u.replace("-", "")
-    return u
+        return u
+
+    return date_id
 
 
 def root_dir():
