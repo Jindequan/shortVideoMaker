@@ -309,6 +309,8 @@ Generate a script for a video, depending on the subject of the video.
 6. do not include "voiceover", "narrator" or similar indicators of what should be spoken at the beginning of each paragraph or line.
 7. you must not mention the prompt, or anything about the script itself. also, never talk about the amount of paragraphs or lines. just write the script.
 8. respond in the same language as the video subject.
+9. the script must be clear and concise, avoid using long sentences and complex words.
+10. The text must be logically clear and well-structured, using frameworks like general to specific, general-specific-general, or specific to general. Ensure self-consistent logic without contradictions. Use numbered lists (1, 2, 3...) to distinguish different elements when needed. For example: Thesis - Effective writing requires structure. Point 1 - Clear frameworks improve readability. Point 2 - Logical flow prevents confusion. Conclusion - Thus structure is essential. Adapt structure to context while maintaining logical coherence.
 
 # Initialization:
 - video subject: {video_subject}
