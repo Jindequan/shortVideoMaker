@@ -910,7 +910,7 @@ with right_panel:
 start_button = st.button(tr("Generate Video"), use_container_width=True, type="primary")
 if start_button:
     config.save_config()
-    task_id = str(uuid4())
+    task_id = utils.get_uuid()  # 使用修改后的函数，返回日期格式的ID
     if not params.video_subject and not params.video_script:
         st.error(tr("Video Script and Subject Cannot Both Be Empty"))
         scroll_to_bottom()

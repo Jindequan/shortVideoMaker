@@ -1,15 +1,14 @@
-from uuid import uuid4
-
 from fastapi import Request
 
 from app.config import config
 from app.models.exception import HttpException
+from app.utils import utils
 
 
 def get_task_id(request: Request):
     task_id = request.headers.get("x-task-id")
     if not task_id:
-        task_id = uuid4()
+        task_id = utils.get_uuid()  # 使用修改后的函数，返回日期格式的ID
     return str(task_id)
 
 
