@@ -55,6 +55,42 @@ python long_video_maker.py --task-path /path/to/task --title "视频标题"
 - 转场效果：渐变过渡
 - 标题显示：2秒开场
 
+## 生成配音文件
+
+将文本转换为语音文件，支持多种TTS服务（Azure、SiliconFlow）。
+
+### 使用方法
+
+1. 直接转换文本：
+
+```bash
+python voice_maker.py --text "要转换的文本内容"
+```
+
+2. 从文件读取文本：
+
+```bash
+python voice_maker.py --file /path/to/text/file.txt
+```
+
+### 参数说明
+
+- `--text`：要转换为语音的文本（与--file互斥，必选其一）
+- `--file`：包含要转换文本的文件路径（与--text互斥，必选其一）
+- `--voice-name`：语音名称，例如：zh-CN-XiaoyiNeural-Female（可选，默认使用配置文件中的设置）
+- `--voice-rate`：语音速度，范围[0.25, 4.0]，默认1.0
+- `--voice-volume`：语音音量，范围[0.6, 5.0]，默认1.0
+- `--output`：输出的音频文件路径（可选，默认在当前目录或输入文件同目录）
+
+### 配置说明
+
+在`config.toml`中可以设置默认语音：
+
+```toml
+[ui]
+voice_name = "zh-CN-YunyangNeural-Male"
+```
+
 ## 注意事项
 
 1. 确保已正确配置 `config.toml`
