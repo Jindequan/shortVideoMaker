@@ -136,173 +136,268 @@ def combine_videos(
     aspect = VideoAspect(video_aspect)
     video_width, video_height = aspect.to_resolution()
 
-    processed_clips = []
-    subclipped_items = []
+    # 创建临时目录存储处理后的视频片段
+    temp_dir = os.path.join(output_dir, "temp_clips")
+    os.makedirs(temp_dir, exist_ok=True)
+    
+    processed_clip_paths = []
     video_duration = 0
-    for video_path in video_paths:
-        clip = VideoFileClip(video_path)
-        clip_duration = clip.duration
-        clip_w, clip_h = clip.size
-        close_clip(clip)
-        
-        start_time = 0
-
-        while start_time < clip_duration:
-            end_time = min(start_time + max_clip_duration, clip_duration)            
-            if clip_duration - start_time >= max_clip_duration:
-                subclipped_items.append(SubClippedVideoClip(file_path= video_path, start_time=start_time, end_time=end_time, width=clip_w, height=clip_h))
-            start_time = end_time    
-            if video_concat_mode.value == VideoConcatMode.sequential.value:
-                break
-
-    # random subclipped_items order
-    if video_concat_mode.value == VideoConcatMode.random.value:
-        random.shuffle(subclipped_items)
-        
-    logger.debug(f"total subclipped items: {len(subclipped_items)}")
     
-    # Add downloaded clips over and over until the duration of the audio (max_duration) has been reached
-    for i, subclipped_item in enumerate(subclipped_items):
-        if video_duration > audio_duration:
-            break
-        
-        logger.debug(f"processing clip {i+1}: {subclipped_item.width}x{subclipped_item.height}, current duration: {video_duration:.2f}s, remaining: {audio_duration - video_duration:.2f}s")
-        
+    # 逐个处理视频文件
+    for i, video_path in enumerate(video_paths):
         try:
-            clip = VideoFileClip(subclipped_item.file_path).subclipped(subclipped_item.start_time, subclipped_item.end_time)
+            # 加载视频并获取基本信息
+            clip = VideoFileClip(video_path)
             clip_duration = clip.duration
-            # Not all videos are same size, so we need to resize them
             clip_w, clip_h = clip.size
-            if clip_w != video_width or clip_h != video_height:
-                clip_ratio = clip.w / clip.h
-                video_ratio = video_width / video_height
-                logger.debug(f"resizing clip, source: {clip_w}x{clip_h}, ratio: {clip_ratio:.2f}, target: {video_width}x{video_height}, ratio: {video_ratio:.2f}")
-                
-                if clip_ratio == video_ratio:
-                    clip = clip.resized(new_size=(video_width, video_height))
-                else:
-                    if clip_ratio > video_ratio:
-                        scale_factor = video_width / clip_w
-                    else:
-                        scale_factor = video_height / clip_h
-
-                    new_width = int(clip_w * scale_factor)
-                    new_height = int(clip_h * scale_factor)
-
-                    background = ColorClip(size=(video_width, video_height), color=(0, 0, 0)).with_duration(clip_duration)
-                    clip_resized = clip.resized(new_size=(new_width, new_height)).with_position("center")
-                    clip = CompositeVideoClip([background, clip_resized])
-                    
-            shuffle_side = random.choice(["left", "right", "top", "bottom"])
-            if video_transition_mode.value == VideoTransitionMode.none.value:
-                clip = clip
-            elif video_transition_mode.value == VideoTransitionMode.fade_in.value:
-                clip = video_effects.fadein_transition(clip, 1)
-            elif video_transition_mode.value == VideoTransitionMode.fade_out.value:
-                clip = video_effects.fadeout_transition(clip, 1)
-            elif video_transition_mode.value == VideoTransitionMode.slide_in.value:
-                clip = video_effects.slidein_transition(clip, 1, shuffle_side)
-            elif video_transition_mode.value == VideoTransitionMode.slide_out.value:
-                clip = video_effects.slideout_transition(clip, 1, shuffle_side)
-            elif video_transition_mode.value == VideoTransitionMode.shuffle.value:
-                transition_funcs = [
-                    lambda c: video_effects.fadein_transition(c, 1),
-                    lambda c: video_effects.fadeout_transition(c, 1),
-                    lambda c: video_effects.slidein_transition(c, 1, shuffle_side),
-                    lambda c: video_effects.slideout_transition(c, 1, shuffle_side),
-                ]
-                shuffle_transition = random.choice(transition_funcs)
-                clip = shuffle_transition(clip)
-
-            if clip.duration > max_clip_duration:
-                clip = clip.subclipped(0, max_clip_duration)
-                
-            # wirte clip to temp file
-            clip_file = f"{output_dir}/temp-clip-{i+1}.mp4"
-            clip.write_videofile(clip_file, logger=None, fps=fps, codec=video_codec)
             
+            # 计算调整后的尺寸
+            if clip_w / clip_h > video_width / video_height:
+                new_width = video_width
+                new_height = int(clip_h * (video_width / clip_w))
+            else:
+                new_height = video_height
+                new_width = int(clip_w * (video_height / clip_h))
+            
+            # 处理视频片段
+            start_time = 0
+            while start_time < clip_duration:
+                end_time = min(start_time + max_clip_duration, clip_duration)
+                
+                # 创建子片段
+                subclip = clip.subclip(start_time, end_time)
+                resized_clip = subclip.resize((new_width, new_height))
+                
+                # 创建背景并合成
+                color_clip = ColorClip(size=(video_width, video_height), color=(0, 0, 0))
+                color_clip = color_clip.set_duration(resized_clip.duration)
+                
+                # 计算居中位置
+                x_offset = (video_width - new_width) // 2
+                y_offset = (video_height - new_height) // 2
+                
+                # 合成视频
+                composite_clip = CompositeVideoClip(
+                    [color_clip, resized_clip.set_position((x_offset, y_offset))]
+                )
+                
+                # 保存处理后的片段
+                temp_clip_path = os.path.join(temp_dir, f"clip_{i}_{start_time}.mp4")
+                composite_clip.write_videofile(
+                    temp_clip_path,
+                    codec='libx264',
+                    audio=False,
+                    threads=threads,
+                    preset='ultrafast',
+                    logger=None
+                )
+                
+                processed_clip_paths.append(temp_clip_path)
+                video_duration += composite_clip.duration
+                
+                # 释放内存
+                close_clip(subclip)
+                close_clip(resized_clip)
+                close_clip(color_clip)
+                close_clip(composite_clip)
+                
+                start_time = end_time
+                if video_concat_mode.value == VideoConcatMode.sequential.value:
+                    break
+            
+            # 释放原始视频内存
             close_clip(clip)
-        
-            processed_clips.append(SubClippedVideoClip(file_path=clip_file, duration=clip.duration, width=clip_w, height=clip_h))
-            video_duration += clip.duration
+            
+            # 强制垃圾回收
+            gc.collect()
             
         except Exception as e:
-            logger.error(f"failed to process clip: {str(e)}")
+            logger.error(f"处理视频文件失败: {video_path}, 错误: {str(e)}")
+            continue
+
+    # 随机打乱处理后的片段顺序，并确保相邻片段不重复
+    if video_concat_mode.value == VideoConcatMode.random.value:
+        # 如果片段数量大于1，确保相邻片段不重复
+        if len(processed_clip_paths) > 1:
+            shuffled_paths = []
+            available_paths = processed_clip_paths.copy()
+            
+            # 选择第一个片段
+            first_clip = random.choice(available_paths)
+            shuffled_paths.append(first_clip)
+            available_paths.remove(first_clip)
+            
+            # 选择剩余片段，避免相邻重复
+            while available_paths:
+                # 如果只剩最后一个片段，且它与第一个片段相同，则与倒数第二个交换
+                if len(available_paths) == 1 and available_paths[0] == shuffled_paths[0]:
+                    shuffled_paths[-1], available_paths[0] = available_paths[0], shuffled_paths[-1]
+                
+                # 从可用片段中随机选择一个不同于前一个的片段
+                candidates = [p for p in available_paths if p != shuffled_paths[-1]]
+                if not candidates:  # 如果没有其他选择，就用剩下的任意一个
+                    candidates = available_paths
+                
+                next_clip = random.choice(candidates)
+                shuffled_paths.append(next_clip)
+                available_paths.remove(next_clip)
+            
+            processed_clip_paths = shuffled_paths
+        else:
+            random.shuffle(processed_clip_paths)
+        
+    logger.debug(f"总共处理的视频片段数: {len(processed_clip_paths)}")
     
-    # loop processed clips until the video duration matches or exceeds the audio duration.
-    if video_duration < audio_duration:
-        logger.warning(f"video duration ({video_duration:.2f}s) is shorter than audio duration ({audio_duration:.2f}s), looping clips to match audio length.")
-        base_clips = processed_clips.copy()
-        for clip in itertools.cycle(base_clips):
-            if video_duration >= audio_duration:
-                break
-            processed_clips.append(clip)
-            video_duration += clip.duration
-        logger.info(f"video duration: {video_duration:.2f}s, audio duration: {audio_duration:.2f}s, looped {len(processed_clips)-len(base_clips)} clips")
-     
-    # merge video clips progressively, avoid loading all videos at once to avoid memory overflow
-    logger.info("starting clip merging process")
-    if not processed_clips:
-        logger.warning("no clips available for merging")
+    # 合并视频片段
+    logger.info("开始合并视频片段")
+    if not processed_clip_paths:
+        logger.warning("没有可用的视频片段")
         return combined_video_path
     
-    # if there is only one clip, use it directly
-    if len(processed_clips) == 1:
-        logger.info("using single clip directly")
-        shutil.copy(processed_clips[0].file_path, combined_video_path)
-        delete_files(processed_clips)
-        logger.info("video combining completed")
+    # 如果只有一个片段，直接使用
+    if len(processed_clip_paths) == 1:
+        logger.info("只有一个视频片段，直接使用")
+        shutil.copy(processed_clip_paths[0], combined_video_path)
+        # 清理临时文件
+        delete_files(processed_clip_paths)
+        shutil.rmtree(temp_dir, ignore_errors=True)
         return combined_video_path
     
-    # create initial video file as base
-    base_clip_path = processed_clips[0].file_path
-    temp_merged_video = f"{output_dir}/temp-merged-video.mp4"
-    temp_merged_next = f"{output_dir}/temp-merged-next.mp4"
+    # 使用分批合并策略减少内存占用
+    temp_merged_video = os.path.join(output_dir, "temp_merged.mp4")
+    temp_merged_next = os.path.join(output_dir, "temp_merged_next.mp4")
     
-    # copy first clip as initial merged video
-    shutil.copy(base_clip_path, temp_merged_video)
+    # 复制第一个片段作为初始合并视频
+    shutil.copy(processed_clip_paths[0], temp_merged_video)
     
-    # merge remaining video clips one by one
-    for i, clip in enumerate(processed_clips[1:], 1):
-        logger.info(f"merging clip {i}/{len(processed_clips)-1}, duration: {clip.duration:.2f}s")
+    # 分批合并视频片段，每次只处理两个片段
+    batch_size = 2
+    for i in range(1, len(processed_clip_paths), batch_size):
+        logger.info(f"合并片段 {i}/{len(processed_clip_paths)-1}")
         
         try:
-            # load current base video and next clip to merge
+            # 加载当前基础视频
             base_clip = VideoFileClip(temp_merged_video)
-            next_clip = VideoFileClip(clip.file_path)
             
-            # merge these two clips
-            merged_clip = concatenate_videoclips([base_clip, next_clip])
-
-            # save merged result to temp file
-            merged_clip.write_videofile(
-                filename=temp_merged_next,
-                threads=threads,
-                logger=None,
-                temp_audiofile_path=output_dir,
-                audio_codec=audio_codec,
-                fps=fps,
-            )
-            close_clip(base_clip)
-            close_clip(next_clip)
-            close_clip(merged_clip)
+            # 加载并处理当前批次的片段
+            batch_clips = []
+            for j in range(i, min(i + batch_size, len(processed_clip_paths))):
+                next_clip = VideoFileClip(processed_clip_paths[j])
             
-            # replace base file with new merged file
-            delete_files(temp_merged_video)
-            os.rename(temp_merged_next, temp_merged_video)
+                # 添加转场效果
+                if video_transition_mode and video_transition_mode.value != VideoTransitionMode.none.value:
+                    shuffle_side = random.choice(["left", "right", "top", "bottom"])
+                    if video_transition_mode.value == VideoTransitionMode.fade_in.value:
+                        next_clip = video_effects.fadein_transition(next_clip, 1)
+                    elif video_transition_mode.value == VideoTransitionMode.fade_out.value:
+                        next_clip = video_effects.fadeout_transition(next_clip, 1)
+                    elif video_transition_mode.value == VideoTransitionMode.slide_in.value:
+                        next_clip = video_effects.slidein_transition(next_clip, 1, shuffle_side)
+                    elif video_transition_mode.value == VideoTransitionMode.slide_out.value:
+                        next_clip = video_effects.slideout_transition(next_clip, 1, shuffle_side)
+                    elif video_transition_mode.value == VideoTransitionMode.shuffle.value:
+                        transition_funcs = [
+                            lambda c: video_effects.fadein_transition(c, 1),
+                            lambda c: video_effects.fadeout_transition(c, 1),
+                            lambda c: video_effects.slidein_transition(c, 1, shuffle_side),
+                            lambda c: video_effects.slideout_transition(c, 1, shuffle_side),
+                        ]
+                        next_clip = random.choice(transition_funcs)(next_clip)
+                
+                batch_clips.append(next_clip)
+            
+            # 合并当前批次的片段
+            if batch_clips:
+                clips_to_merge = [base_clip] + batch_clips
+                merged_clip = concatenate_videoclips(clips_to_merge)
+                
+                # 保存合并结果
+                merged_clip.write_videofile(
+                    temp_merged_next,
+                    codec='libx264',
+                    audio=False,
+                    threads=threads,
+                    preset='ultrafast',
+                    logger=None
+                )
+                
+                # 释放内存
+                close_clip(base_clip)
+                for clip in batch_clips:
+                    close_clip(clip)
+                close_clip(merged_clip)
+                
+                # 更新基础文件
+                os.remove(temp_merged_video)
+                os.rename(temp_merged_next, temp_merged_video)
+                
+                # 强制垃圾回收
+                gc.collect()
+                
+                # 清空当前批次
+                batch_clips = []
             
         except Exception as e:
-            logger.error(f"failed to merge clip: {str(e)}")
+            logger.error(f"合并视频片段失败: {str(e)}")
             continue
     
-    # after merging, rename final result to target file name
-    os.rename(temp_merged_video, combined_video_path)
+    # 完成合并，移动到最终位置
+    if os.path.exists(temp_merged_video):
+        shutil.move(temp_merged_video, combined_video_path)
     
-    # clean temp files
-    clip_files = [clip.file_path for clip in processed_clips]
-    delete_files(clip_files)
-            
-    logger.info("video combining completed")
+    # 清理临时文件
+    delete_files(processed_clip_paths)
+    shutil.rmtree(temp_dir, ignore_errors=True)
+    
+    # 添加音频
+    try:
+        logger.info("添加音频到视频")
+        video_clip = VideoFileClip(combined_video_path)
+        
+        # 如果视频时长小于音频时长，循环视频直到匹配音频时长
+        if video_duration < audio_duration:
+            logger.warning(f"视频时长 ({video_duration:.2f}s) 小于音频时长 ({audio_duration:.2f}s)，循环视频以匹配音频长度")
+            repeat_times = int(audio_duration / video_duration) + 1
+            video_clip = concatenate_videoclips([video_clip] * repeat_times)
+        
+        # 裁剪视频以匹配音频时长
+        if video_clip.duration > audio_duration:
+            video_clip = video_clip.subclip(0, audio_duration)
+        
+        # 裁剪音频以匹配视频时长
+        if audio_clip.duration > video_clip.duration:
+            audio_clip = audio_clip.subclip(0, video_clip.duration)
+        
+        # 合成音视频
+        final_clip = video_clip.set_audio(audio_clip)
+        
+        # 保存最终结果
+        temp_final = os.path.join(output_dir, "temp_final.mp4")
+        final_clip.write_videofile(
+            temp_final,
+            codec='libx264',
+            audio_codec='aac',
+            threads=threads,
+            preset='ultrafast',
+            logger=None
+        )
+        
+        # 释放内存
+        close_clip(video_clip)
+        close_clip(audio_clip)
+        close_clip(final_clip)
+        
+        # 更新最终文件
+        os.remove(combined_video_path)
+        os.rename(temp_final, combined_video_path)
+        
+        # 强制垃圾回收
+        gc.collect()
+        
+    except Exception as e:
+        logger.error(f"添加音频失败: {str(e)}")
+    
+    logger.info("视频合成完成")
     return combined_video_path
 
 
